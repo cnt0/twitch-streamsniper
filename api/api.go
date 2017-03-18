@@ -60,8 +60,8 @@ type Stream struct {
 	Formats     []FormatItem  `json:"formats"`
 }
 
-func (s *Stream) UpdateFormats() error {
-	data, err := exec.Command("youtube-dl", "-J", "--skip-download", s.Channel.URL).Output()
+func (s *Stream) UpdateFormats(ytdl string) error {
+	data, err := exec.Command(ytdl, "-J", "--skip-download", s.Channel.URL).Output()
 	if err != nil {
 		return err
 	}
@@ -81,10 +81,10 @@ type FollowedStreams struct {
 	Streams []Stream `json:"streams"`
 }
 
-func (f *FollowedStreams) UpdateFormats(channel string) (*Stream, error) {
+func (f *FollowedStreams) UpdateFormats(channel, ytdl string) (*Stream, error) {
 	for _, s := range f.Streams {
 		if s.Channel.DisplayName == channel {
-			if err := s.UpdateFormats(); err != nil {
+			if err := s.UpdateFormats(ytdl); err != nil {
 				return nil, err
 			}
 			return &s, nil
