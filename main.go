@@ -8,7 +8,9 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/blang/mpv"
 	"github.com/rakyll/statik/fs"
+	"github.com/rs/cors"
 
 	"github.com/cnt0/twitch-streamsniper/api"
 	_ "github.com/cnt0/twitch-streamsniper/site/statik"
@@ -20,6 +22,7 @@ var (
 	client  = flag.String("client", "", "")
 	auth    = flag.String("auth", "", "")
 	ytdl    = flag.String("ytdl", "", "")
+	socket  = flag.String("socket", "", "")
 )
 
 func HandleUpdateAll(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +39,7 @@ func HandleUpdateAll(w http.ResponseWriter, r *http.Request) {
 
 func HandleUpdateFormats(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("s")
+	log.Println("update formats for " + channel)
 	if channel == "" {
 		m.Lock()
 		if err := json.NewEncoder(w).Encode(streams); err != nil {
@@ -43,9 +47,7 @@ func HandleUpdateFormats(w http.ResponseWriter, r *http.Request) {
 		}
 		m.Unlock()
 	}
-	m.Lock()
 	stream, err := streams.UpdateFormats(channel, *ytdl)
-	m.Unlock()
 	if err != nil {
 		log.Println(err)
 	} else if stream == nil {
@@ -55,6 +57,20 @@ func HandleUpdateFormats(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 		}
 	}
+}
+
+func HandlePlayVideo(w http.ResponseWriter, r *http.Request) {
+	if len(*socket) > 0 {
+		var s struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+			log.Println(err)
+		}
+		log.Printf("playing video %v", s.URL)
+		mpv.NewClient(mpv.NewIPCClient(*socket)).Loadfile(s.URL, mpv.LoadFileModeReplace)
+	}
+
 }
 
 func init() {
@@ -78,9 +94,14 @@ func main() {
 	m.Unlock()
 
 	statikFS, _ := fs.New()
-	http.Handle("/", http.FileServer(statikFS))
-	http.HandleFunc("/formats", HandleUpdateFormats)
-	http.HandleFunc("/update", HandleUpdateAll)
-
-	http.ListenAndServe(":8080", nil)
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(statikFS))
+	mux.HandleFunc("/formats", HandleUpdateFormats)
+	mux.HandleFunc("/update", HandleUpdateAll)
+	mux.HandleFunc("/play", HandlePlayVideo)
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:8080", "http://localhost:4200"},
+		AllowCredentials: true,
+	})
+	http.ListenAndServe(":8080", c.Handler(mux))
 }
