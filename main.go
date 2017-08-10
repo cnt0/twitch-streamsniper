@@ -100,7 +100,10 @@ func main() {
 	mux.HandleFunc("/update", HandleUpdateAll)
 	mux.HandleFunc("/play", HandlePlayVideo)
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:8080", "http://localhost:4200"},
+		AllowedOrigins: []string{
+			"http://localhost:8080",
+			//"http://localhost:4200",
+		},
 		AllowCredentials: true,
 	})
 	http.ListenAndServe(":8080", c.Handler(mux))
