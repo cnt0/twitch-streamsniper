@@ -23,6 +23,9 @@ var (
 	auth    = flag.String("auth", "", "")
 	ytdl    = flag.String("ytdl", "", "")
 	socket  = flag.String("socket", "", "")
+
+	mpvClientMutex sync.Mutex
+	mpvClient      *mpv.Client
 )
 
 func HandleUpdateAll(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +71,9 @@ func HandlePlayVideo(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 		}
 		log.Printf("playing video %v", s.URL)
-		mpv.NewClient(mpv.NewIPCClient(*socket)).Loadfile(s.URL, mpv.LoadFileModeReplace)
+		mpvClientMutex.Lock()
+		mpvClient.Loadfile(s.URL, mpv.LoadFileModeReplace)
+		mpvClientMutex.Unlock()
 	}
 
 }
@@ -78,6 +83,7 @@ func init() {
 	if len(*ytdl) == 0 {
 		*ytdl = "youtube-dl"
 	}
+	mpvClient = mpv.NewClient(mpv.NewIPCClient(*socket))
 }
 
 func main() {
