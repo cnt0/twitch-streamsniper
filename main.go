@@ -5,8 +5,11 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 	"runtime"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/blang/mpv"
 	"github.com/rakyll/statik/fs"
@@ -24,9 +27,21 @@ var (
 	ytdl    = flag.String("ytdl", "", "")
 	socket  = flag.String("socket", "", "")
 
+	socketCtime time.Time
+
 	mpvClientMutex sync.Mutex
 	mpvClient      *mpv.Client
 )
+
+func statTime(name string) (ctime time.Time, err error) {
+	fi, err := os.Stat(name)
+	if err != nil {
+		return
+	}
+	stat := fi.Sys().(*syscall.Stat_t)
+	ctime = time.Unix(int64(stat.Ctim.Sec), int64(stat.Ctim.Nsec))
+	return
+}
 
 func HandleUpdateAll(w http.ResponseWriter, r *http.Request) {
 	m.Lock()
@@ -42,7 +57,7 @@ func HandleUpdateAll(w http.ResponseWriter, r *http.Request) {
 
 func HandleUpdateFormats(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("s")
-	log.Println("update formats for " + channel)
+	log.Println("update stream for " + channel)
 	if channel == "" {
 		m.Lock()
 		if err := json.NewEncoder(w).Encode(streams); err != nil {
@@ -50,7 +65,7 @@ func HandleUpdateFormats(w http.ResponseWriter, r *http.Request) {
 		}
 		m.Unlock()
 	}
-	stream, err := streams.UpdateFormats(channel, *ytdl)
+	stream, err := streams.UpdateStream(channel, *client, *ytdl)
 	if err != nil {
 		log.Println(err)
 	} else if stream == nil {
@@ -72,7 +87,18 @@ func HandlePlayVideo(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("playing video %v", s.URL)
 		mpvClientMutex.Lock()
-		mpvClient.Loadfile(s.URL, mpv.LoadFileModeReplace)
+		if t, err := statTime(*socket); err != nil {
+			log.Println(err)
+		} else {
+			if t != socketCtime {
+				log.Printf("socket file has been recreated; new ctime is %v; need to renew mpvClient", t)
+				socketCtime = t
+				mpvClient = mpv.NewClient(mpv.NewIPCClient(*socket))
+			}
+			if err := mpvClient.Loadfile(s.URL, mpv.LoadFileModeReplace); err != nil {
+				log.Println(err)
+			}
+		}
 		mpvClientMutex.Unlock()
 	}
 
@@ -82,6 +108,12 @@ func init() {
 	flag.Parse()
 	if len(*ytdl) == 0 {
 		*ytdl = "youtube-dl"
+	}
+	if ctime, err := statTime(*socket); err == nil {
+		socketCtime = ctime
+		log.Printf("socket file created at %v", socketCtime)
+	} else {
+		log.Println(err)
 	}
 	mpvClient = mpv.NewClient(mpv.NewIPCClient(*socket))
 }
@@ -108,7 +140,7 @@ func main() {
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{
 			"http://localhost:8080",
-			//"http://localhost:4200",
+			"http://localhost:4200",
 		},
 		AllowCredentials: true,
 	})

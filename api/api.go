@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 )
 
 type StreamChannel struct {
+	ID                  int    `json:"_id"`
 	BroadCasterLanguage string `json:"broadcaster_language"`
 	CreatedAt           string `json:"created_at"`
 	DisplayName         string `json:"display_name"`
@@ -60,15 +62,55 @@ type Stream struct {
 	Formats     []FormatItem  `json:"formats"`
 }
 
-func (s *Stream) UpdateFormats(ytdl string) error {
-	data, err := exec.Command(ytdl, "-J", "--skip-download", s.Channel.URL).Output()
+type StreamResult struct {
+	S *Stream
+	E error
+}
+
+func NewStream(channel *StreamChannel, client, ytdl string) (*Stream, error) {
+	chS := make(chan StreamResult)
+	go func(id string, ch chan StreamResult) {
+		req, err := http.NewRequest("GET", "https://api.twitch.tv/kraken/streams/"+id, nil)
+		if err != nil {
+			ch <- StreamResult{nil, err}
+			return
+		}
+		req.Header.Set("Accept", "application/vnd.twitchtv.v5+json")
+		req.Header.Set("Client-ID", client)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			ch <- StreamResult{nil, err}
+			return
+		}
+		var newStream struct {
+			S Stream `json:"stream"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&newStream); err != nil {
+			ch <- StreamResult{nil, err}
+			return
+		}
+		if err := resp.Body.Close(); err != nil {
+			ch <- StreamResult{nil, err}
+			return
+		}
+		ch <- StreamResult{&newStream.S, nil}
+	}(strconv.Itoa(channel.ID), chS)
+	var newFormats struct {
+		Formats []FormatItem `json:"formats"`
+	}
+	data, err := exec.Command(ytdl, "-J", "--skip-download", channel.URL).Output()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := json.Unmarshal(data, &s); err != nil {
-		return err
+	if err := json.Unmarshal(data, &newFormats); err != nil {
+		return nil, err
 	}
-	return nil
+	res := <-chS
+	if res.E != nil {
+		return nil, err
+	}
+	res.S.Formats = newFormats.Formats
+	return res.S, nil
 }
 
 type FormatItem struct {
@@ -81,16 +123,18 @@ type FollowedStreams struct {
 	Streams []Stream `json:"streams"`
 }
 
-func (f *FollowedStreams) UpdateFormats(channel, ytdl string) (*Stream, error) {
-	for _, s := range f.Streams {
-		if s.Channel.DisplayName == channel {
-			if err := s.UpdateFormats(ytdl); err != nil {
+func (f *FollowedStreams) UpdateStream(channelName, client, ytdl string) (*Stream, error) {
+	for i, s := range f.Streams {
+		if s.Channel.DisplayName == channelName {
+			if s1, err := NewStream(&s.Channel, client, ytdl); err != nil {
 				return nil, err
+			} else {
+				f.Streams[i] = *s1
 			}
-			return &s, nil
+			return &f.Streams[i], nil
 		}
 	}
-	return nil, nil
+	return nil, errors.New(channelName + ": no such channel")
 }
 
 func ParseFollowedStreams(client, auth string) (*FollowedStreams, error) {
