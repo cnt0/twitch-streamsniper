@@ -3,10 +3,13 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -26,8 +29,6 @@ var (
 	auth    = flag.String("auth", "", "")
 	ytdl    = flag.String("ytdl", "", "")
 	socket  = flag.String("socket", "", "")
-
-	socketCtime time.Time
 
 	mpvClientMutex sync.Mutex
 	mpvClient      *mpv.Client
@@ -87,17 +88,11 @@ func HandlePlayVideo(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("playing video %v", s.URL)
 		mpvClientMutex.Lock()
-		if t, err := statTime(*socket); err != nil {
+		if mpvClient == nil {
+			mpvClient = mpv.NewClient(mpv.NewIPCClient(*socket))
+		}
+		if err := mpvClient.Loadfile(s.URL, mpv.LoadFileModeReplace); err != nil {
 			log.Println(err)
-		} else {
-			if t != socketCtime {
-				log.Printf("socket file has been recreated; new ctime is %v; need to renew mpvClient", t)
-				socketCtime = t
-				mpvClient = mpv.NewClient(mpv.NewIPCClient(*socket))
-			}
-			if err := mpvClient.Loadfile(s.URL, mpv.LoadFileModeReplace); err != nil {
-				log.Println(err)
-			}
 		}
 		mpvClientMutex.Unlock()
 	}
@@ -109,18 +104,11 @@ func init() {
 	if len(*ytdl) == 0 {
 		*ytdl = "youtube-dl"
 	}
-	if ctime, err := statTime(*socket); err == nil {
-		socketCtime = ctime
-		log.Printf("socket file created at %v", socketCtime)
-	} else {
-		log.Println(err)
-	}
-	mpvClient = mpv.NewClient(mpv.NewIPCClient(*socket))
 }
 
 func main() {
 
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	runtime.GOMAXPROCS(1)
 	log.Printf("client: %v", *client)
 	log.Printf("auth: %v", *auth)
 
@@ -144,5 +132,15 @@ func main() {
 		},
 		AllowCredentials: true,
 	})
-	http.ListenAndServe(":8080", c.Handler(mux))
+	if os.Getenv("LISTEN_PID") == strconv.Itoa(os.Getpid()) {
+		if l, err := net.FileListener(os.NewFile(3, "socket")); err != nil {
+			fmt.Println(err)
+		} else {
+			if err := http.Serve(l, c.Handler(mux)); err != nil {
+				fmt.Println(err)
+			}
+		}
+	} else {
+		http.ListenAndServe(":8080", c.Handler(mux))
+	}
 }
