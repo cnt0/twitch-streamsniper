@@ -18,6 +18,7 @@ import (
 	"github.com/rakyll/statik/fs"
 	"github.com/rs/cors"
 
+	ims "github.com/cnt0/if-modified-since"
 	"github.com/cnt0/twitch-streamsniper/api"
 	_ "github.com/cnt0/twitch-streamsniper/site/statik"
 )
@@ -119,12 +120,14 @@ func main() {
 	}
 	m.Unlock()
 
+	withTimeout5 := ims.NewWithTimeout(5 * time.Second)
+
 	statikFS, _ := fs.New()
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(statikFS))
-	mux.HandleFunc("/formats", HandleUpdateFormats)
-	mux.HandleFunc("/update", HandleUpdateAll)
-	mux.HandleFunc("/play", HandlePlayVideo)
+	mux.Handle("/formats", withTimeout5.Handler(http.HandlerFunc(HandleUpdateFormats)))
+	mux.Handle("/update", withTimeout5.Handler(http.HandlerFunc(HandleUpdateAll)))
+	mux.Handle("/play", withTimeout5.Handler(http.HandlerFunc(HandlePlayVideo)))
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{
 			"http://localhost:8080",
