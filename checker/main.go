@@ -29,14 +29,12 @@ type TwitchChannel struct {
 	Status      string `json:"status"`
 }
 
+// ToDo get rid of LastModofied field because
+// firestore already stores timepoint metadata
+// snapshot.UpdateTime etc
 type TwitchData struct {
 	LastModified time.Time
 	Channels     map[string]*TwitchChannel
-}
-
-type TwitchDataWithErr struct {
-	*TwitchData
-	error
 }
 
 var TwitchAuthHeaders = http.Header{
@@ -53,30 +51,30 @@ func init() {
 		TwitchAuthHeaders.Get("Authorization")+os.Getenv(TwitchAuth))
 }
 
-func OldChannels(client *firestore.Client, ctx context.Context) TwitchDataWithErr {
+func OldChannels(client *firestore.Client, ctx context.Context) (*TwitchData, error) {
 
 	snapshot, err := client.Collection(os.Getenv(FirestoreCollection)).
 		Doc(os.Getenv(FirestoreDocID)).
 		Get(ctx)
 	if err != nil {
-		return TwitchDataWithErr{nil, err}
+		return nil, err
 	}
 	var doc TwitchData
 	if err := snapshot.DataTo(&doc); err != nil {
-		return TwitchDataWithErr{nil, err}
+		return nil, err
 	}
-	return TwitchDataWithErr{&doc, nil}
+	return &doc, nil
 }
 
-func NewChannels() TwitchDataWithErr {
+func NewChannels() (*TwitchData, error) {
 	req, err := http.NewRequest("GET", TwitchAPIFollowed, nil)
 	if err != nil {
-		return TwitchDataWithErr{nil, err}
+		return nil, err
 	}
 	req.Header = TwitchAuthHeaders
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return TwitchDataWithErr{nil, err}
+		return nil, err
 	}
 	defer resp.Body.Close()
 	var data struct {
@@ -89,7 +87,7 @@ func NewChannels() TwitchDataWithErr {
 	}
 	err = json.NewDecoder(resp.Body).Decode(&data)
 	if err != nil {
-		return TwitchDataWithErr{nil, err}
+		return nil, err
 	}
 	ret := TwitchData{
 		LastModified: time.Now(),
@@ -98,7 +96,7 @@ func NewChannels() TwitchDataWithErr {
 	for _, stream := range data.Streams {
 		ret.Channels[stream.Channel.Name] = stream.Channel.TwitchChannel
 	}
-	return TwitchDataWithErr{&ret, nil}
+	return &ret, nil
 }
 
 func equal(data1, data2 *TwitchChannel) bool {
@@ -132,29 +130,30 @@ func main() {
 	defer client.Close()
 
 	// execute requests in parallel
-	var newChannelsRes TwitchDataWithErr
+	var newChannelsData *TwitchData
+	var newChannelsErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		// get fresh channels from twitch
-		newChannelsRes = NewChannels()
+		newChannelsData, newChannelsErr = NewChannels()
 		wg.Done()
 	}()
 	// get old channels from firestore
-	oldChannelsRes := OldChannels(client, ctx)
-	if oldChannelsRes.error != nil {
-		fmt.Println(oldChannelsRes.error)
+	oldChannelsData, oldChannelsErr := OldChannels(client, ctx)
+	if oldChannelsErr != nil {
+		fmt.Println(oldChannelsErr)
 		return
 	}
 	wg.Wait()
-	if newChannelsRes.error != nil {
-		fmt.Println(newChannelsRes.error)
+	if newChannelsErr != nil {
+		fmt.Println(newChannelsErr)
 		return
 	}
 	// handle offline channels
 	// (in old but not in new -> offline)
-	for ch, data := range oldChannelsRes.Channels {
-		if _, ok := newChannelsRes.Channels[ch]; !ok {
+	for ch, data := range oldChannelsData.Channels {
+		if _, ok := newChannelsData.Channels[ch]; !ok {
 			if _, err := notifier.SendNotification(notify.Notification{
 				Summary: data.DisplayName,
 				Body:    "is no longer online",
@@ -166,8 +165,8 @@ func main() {
 	}
 
 	// handle new channels and updated channel headers
-	for ch, dataNew := range newChannelsRes.Channels {
-		dataOld, ok := oldChannelsRes.Channels[ch]
+	for ch, dataNew := range newChannelsData.Channels {
+		dataOld, ok := oldChannelsData.Channels[ch]
 		if !ok || !equal(dataNew, dataOld) {
 			if _, err := notifier.SendNotification(notify.Notification{
 				Summary: fmt.Sprintf("%v is playing %v", dataNew.DisplayName, dataNew.Game),
@@ -179,9 +178,10 @@ func main() {
 		}
 	}
 
+	// send new channels to firestore
 	_, err = client.Collection(os.Getenv(FirestoreCollection)).
 		Doc(os.Getenv(FirestoreDocID)).
-		Set(ctx, newChannelsRes.TwitchData)
+		Set(ctx, newChannelsData)
 	if err != nil {
 		fmt.Println(err)
 		return
