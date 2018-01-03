@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,29 +12,29 @@ import (
 	"github.com/cnt0/twitch-streamsniper/api"
 )
 
-const ytdl = "youtube-dl"
-
-var yt = flag.String("yt", "", "")
+const (
+	ytdl      = "youtube-dl"
+	mpvSocket = "/tmp/mpvsocket"
+)
 
 func main() {
-	flag.Parse()
-	c := mpv.NewClient(mpv.NewIPCClient("/tmp/mpvsocket"))
-	if len(*yt) > 0 {
-		c.SetProperty("ytdl-format", *yt)
-	}
+	c := mpv.NewClient(mpv.NewIPCClient(mpvSocket))
 
 	if u, err := url.Parse(os.Args[len(os.Args)-1]); err == nil {
-		if strings.HasSuffix(strings.ToLower(u.Hostname()), "twitch.tv") {
-			var formats struct {
-				Formats []api.FormatItem `json:"formats"`
-			}
+
+		hostname := strings.ToLower(u.Hostname())
+		var formats struct {
+			Formats []api.FormatItem `json:"formats"`
+		}
+
+		if strings.HasSuffix(hostname, "twitch.tv") {
 			data, err := exec.Command(ytdl, "-J", "--skip-download", os.Args[len(os.Args)-1]).Output()
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
 			if err := json.Unmarshal(data, &formats); err != nil {
-				fmt.Println(err)
+				fmt.Printf("%v is likely offline\n", u.Path)
 				return
 			}
 
@@ -55,10 +54,28 @@ func main() {
 			c.Loadfile(formats.Formats[idx-1].URL, mpv.LoadFileModeReplace)
 			return
 		}
-	}
 
-	if len(os.Args) > 1 {
-		c.Loadfile(os.Args[len(os.Args)-1], mpv.LoadFileModeReplace)
+		if strings.HasSuffix(hostname, "youtube.com") || strings.HasSuffix(hostname, "youtu.be") {
+			data, err := exec.Command(ytdl, "-J", "--skip-download", os.Args[len(os.Args)-1]).Output()
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			if err := json.Unmarshal(data, &formats); err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Println("Hmmm... What does hero truly need?")
+			for i, f := range formats.Formats {
+				fmt.Printf("%v: %v\n", i+1, f.Format)
+			}
+			desiredFormat := ""
+			fmt.Scan(&desiredFormat)
+			c.SetProperty("ytdl-format", desiredFormat)
+			c.Loadfile(os.Args[len(os.Args)-1], mpv.LoadFileModeReplace)
+			return
+		}
+
 	}
 
 }
