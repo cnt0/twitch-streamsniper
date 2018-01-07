@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/esiqveland/notify"
@@ -129,27 +128,29 @@ func main() {
 	}
 	defer client.Close()
 
+	requests := make([]*http.Request, 2)
+
 	// execute requests in parallel
-	var newChannelsData *TwitchData
-	var newChannelsErr error
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		// get fresh channels from twitch
-		newChannelsData, newChannelsErr = NewChannels()
-		wg.Done()
-	}()
-	// get old channels from firestore
-	oldChannelsData, oldChannelsErr := OldChannels(client, ctx)
-	if oldChannelsErr != nil {
-		fmt.Println(oldChannelsErr)
-		return
-	}
-	wg.Wait()
-	if newChannelsErr != nil {
-		fmt.Println(newChannelsErr)
-		return
-	}
+	//var newChannelsData *TwitchData
+	//var newChannelsErr error
+	//var wg sync.WaitGroup
+	//wg.Add(1)
+	//go func() {
+	//// get fresh channels from twitch
+	//newChannelsData, newChannelsErr = NewChannels()
+	//wg.Done()
+	//}()
+	//// get old channels from firestore
+	//oldChannelsData, oldChannelsErr := OldChannels(client, ctx)
+	//if oldChannelsErr != nil {
+	//fmt.Println(oldChannelsErr)
+	//return
+	//}
+	//wg.Wait()
+	//if newChannelsErr != nil {
+	//fmt.Println(newChannelsErr)
+	//return
+	//}
 	// handle offline channels
 	// (in old but not in new -> offline)
 	for ch, data := range oldChannelsData.Channels {
