@@ -3,13 +3,10 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"runtime"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -18,6 +15,7 @@ import (
 	"github.com/rakyll/statik/fs"
 	"github.com/rs/cors"
 
+	"github.com/cnt0/golang-http-utils/utils"
 	"github.com/cnt0/twitch-streamsniper/api"
 	_ "github.com/cnt0/twitch-streamsniper/site/statik"
 )
@@ -134,15 +132,6 @@ func main() {
 		},
 		AllowCredentials: true,
 	})
-	if os.Getenv("LISTEN_PID") == strconv.Itoa(os.Getpid()) {
-		if l, err := net.FileListener(os.NewFile(3, "socket")); err != nil {
-			fmt.Println(err)
-		} else {
-			if err := http.Serve(l, c.Handler(mux)); err != nil {
-				fmt.Println(err)
-			}
-		}
-	} else {
-		http.ListenAndServe(":8080", c.Handler(mux))
-	}
+	utils.ListenAndServeSA(":8080", c.Handler(mux))
+
 }
