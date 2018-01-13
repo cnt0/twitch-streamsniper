@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/url"
 	"os"
@@ -16,6 +17,20 @@ const (
 	ytdl      = "youtube-dl"
 	mpvSocket = "/tmp/mpvsocket"
 )
+
+var printURL = flag.Bool("a", false, "print URL instead of opening stream in mpv")
+
+func processStream(mpvClient *mpv.Client, addr string) {
+	if *printURL {
+		fmt.Println(addr)
+	} else {
+		mpvClient.Loadfile(addr, mpv.LoadFileModeReplace)
+	}
+}
+
+func init() {
+	flag.Parse()
+}
 
 func main() {
 	c := mpv.NewClient(mpv.NewIPCClient(mpvSocket))
@@ -41,7 +56,7 @@ func main() {
 			for _, f := range formats.Formats {
 				s := strings.ToLower(f.Format)
 				if strings.Contains(s, "source") || strings.Contains(s, "1080p60") {
-					c.Loadfile(f.URL, mpv.LoadFileModeReplace)
+					processStream(c, f.URL)
 					return
 				}
 			}
@@ -51,7 +66,7 @@ func main() {
 			}
 			var idx int
 			fmt.Scan(&idx)
-			c.Loadfile(formats.Formats[idx-1].URL, mpv.LoadFileModeReplace)
+			processStream(c, formats.Formats[idx-1].URL)
 			return
 		}
 
@@ -72,7 +87,7 @@ func main() {
 			desiredFormat := ""
 			fmt.Scan(&desiredFormat)
 			c.SetProperty("ytdl-format", desiredFormat)
-			c.Loadfile(os.Args[len(os.Args)-1], mpv.LoadFileModeReplace)
+			processStream(c, os.Args[len(os.Args)-1])
 			return
 		}
 
