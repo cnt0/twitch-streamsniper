@@ -33,7 +33,10 @@ func init() {
 }
 
 func main() {
-	c := mpv.NewClient(mpv.NewIPCClient(mpvSocket))
+	var c *mpv.Client
+	if !*printURL {
+		c = mpv.NewClient(mpv.NewIPCClient(mpvSocket))
+	}
 
 	if u, err := url.Parse(os.Args[len(os.Args)-1]); err == nil {
 
