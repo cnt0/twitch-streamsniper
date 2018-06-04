@@ -5,18 +5,18 @@ import (
 	"flag"
 	"log"
 	"net/http"
-	"os"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/blang/mpv"
 	"github.com/rakyll/statik/fs"
 	"github.com/rs/cors"
 
 	"github.com/cnt0/golang-http-utils/utils"
 	"github.com/cnt0/twitch-streamsniper/api"
+	"github.com/cnt0/twitch-streamsniper/player-connection/mpris"
+	"github.com/cnt0/twitch-streamsniper/player-connection/mpv"
+
 	_ "github.com/cnt0/twitch-streamsniper/site/statik"
 )
 
@@ -25,25 +25,24 @@ const handlerTimeout = 5 * time.Second
 var (
 	m       sync.Mutex
 	streams *api.FollowedStreams
-	client  = flag.String("client", "", "")
-	auth    = flag.String("auth", "", "")
-	ytdl    = flag.String("ytdl", "", "")
-	socket  = flag.String("socket", "", "")
+	client  = flag.String("client", "", "client field for twitch authentication")
+	auth    = flag.String("auth", "", "auth field for twitch authentication")
+	ytdl    = flag.String("ytdl", "youtube-dl", "path to youtube-dl executable")
+	socket  = flag.String("socket", "/tmp/mpvsocket", "path to unix socket for communication with mpv")
+	isMPV   = flag.Bool("mpv", false, "connect to mpv socket instead of mpris dbus")
 
-	mpvClientMutex sync.Mutex
-	mpvClient      *mpv.Client
+	mpvConnection   *mpv.Connection
+	mprisConnection *mpris.Connection
 )
 
-func statTime(name string) (ctime time.Time, err error) {
-	fi, err := os.Stat(name)
-	if err != nil {
-		return
+func playVideo(addr string) error {
+	if *isMPV {
+		return mpvConnection.PlayVideo(addr)
 	}
-	stat := fi.Sys().(*syscall.Stat_t)
-	ctime = time.Unix(int64(stat.Ctim.Sec), int64(stat.Ctim.Nsec))
-	return
+	return mprisConnection.PlayVideo(addr)
 }
 
+// HandleUpdateAll ...
 func HandleUpdateAll(w http.ResponseWriter, r *http.Request) {
 	m.Lock()
 	var err error
@@ -56,6 +55,7 @@ func HandleUpdateAll(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleUpdateFormats ...
 func HandleUpdateFormats(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("s")
 	log.Println("update stream for " + channel)
@@ -78,8 +78,10 @@ func HandleUpdateFormats(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandlePlayVideo ...
 func HandlePlayVideo(w http.ResponseWriter, r *http.Request) {
-	if len(*socket) > 0 {
+	log.Printf("request: %v\n", r.Method)
+	if len(*socket) > 0 && r.Method == "POST" {
 		var s struct {
 			URL string `json:"url"`
 		}
@@ -87,23 +89,15 @@ func HandlePlayVideo(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 		}
 		log.Printf("playing video %v", s.URL)
-		mpvClientMutex.Lock()
-		if mpvClient == nil {
-			mpvClient = mpv.NewClient(mpv.NewIPCClient(*socket))
-		}
-		if err := mpvClient.Loadfile(s.URL, mpv.LoadFileModeReplace); err != nil {
+		if err := playVideo(s.URL); err != nil {
 			log.Println(err)
 		}
-		mpvClientMutex.Unlock()
 	}
 
 }
 
 func init() {
 	flag.Parse()
-	if len(*ytdl) == 0 {
-		*ytdl = "youtube-dl"
-	}
 }
 
 func main() {
