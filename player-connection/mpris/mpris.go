@@ -2,13 +2,15 @@ package mpris
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/godbus/dbus"
 )
 
-const mprisInterface = "/org/mpris/MediaPlayer2"
+const (
+	mprisPath      = "org.mpris.MediaPlayer2"
+	mprisInterface = "/org/mpris/MediaPlayer2"
+)
 
 func upgradeToMRL(url string) string {
 	if strings.HasPrefix(url, "http") {
@@ -32,9 +34,6 @@ func NewConnection() (*Connection, error) {
 }
 
 func (c *Connection) playerInstance() (string, error) {
-	obj := c.conn.BusObject()
-	fmt.Println(obj.Path())
-	fmt.Println(obj.Destination())
 	ret := c.conn.BusObject().Call("org.freedesktop.DBus.ListNames", 0)
 	if ret.Err != nil {
 		return "", ret.Err
@@ -43,7 +42,7 @@ func (c *Connection) playerInstance() (string, error) {
 		return "", errors.New("DBus connection error")
 	}
 	for _, s := range ret.Body[0].([]string) {
-		if strings.HasPrefix(s, "org.mpris.MediaPlayer2") {
+		if strings.HasPrefix(s, mprisPath) {
 			return s, nil
 		}
 	}
@@ -56,11 +55,8 @@ func (c *Connection) PlayVideo(addr string) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Println(instanceName)
-	obj := c.conn.Object(instanceName, "/org/mpris/MediaPlayer2")
-	call := obj.Call("org.mpris.MediaPlayer2.Player.OpenUri", 0, upgradeToMRL(addr))
-	if call.Err != nil {
-		return call.Err
-	}
-	return nil
+	call := c.conn.
+		Object(instanceName, mprisInterface).
+		Call("org.mpris.MediaPlayer2.Player.OpenUri", 0, upgradeToMRL(addr))
+	return call.Err
 }
